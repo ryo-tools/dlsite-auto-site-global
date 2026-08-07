@@ -1,10 +1,56 @@
 import fs from 'fs';
 import path from 'path';
 import { chromium } from 'playwright';
+import { GoogleGenAI } from '@google/genai';
 
 const AFFILIATE_ID = 'yofukashireview';
-// 海外版のドメイン（Cloudflare Pages等のURLに合わせて適宜変更してください）
 const DOMAIN = 'https://dlsite-auto-site-global.pages.dev';
+
+// Gemini APIの初期化（GEMINI_API_KEY がセットされている場合のみ起動）
+const apiKey = process.env.GEMINI_API_KEY;
+const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
+
+// 作品タイトルとサークル名を英語に翻訳する関数
+async function translateItemsToEnglish(items) {
+  if (!ai || items.length === 0) {
+    console.log('GEMINI_API_KEY 未設定またはデータなしのため、AI翻訳をスキップして続行します。');
+    return items;
+  }
+
+  console.log('Gemini APIを使って作品タイトルとサークル名を英語に翻訳中...');
+
+  const prompt = `You are a professional translator for anime, manga, ASMR, and Japanese doujin content.
+Translate the following Japanese product titles and creator/circle names into natural, high-converting English for overseas fans.
+
+STRICT RULES:
+1. Return ONLY a JSON array containing objects with translated "title" and "maker".
+2. Maintain the exact same array order as input.
+3. Use consistent English terminology (e.g., ASMR, Voice Drama, Ear Cleaning, Whispers, Doujinshi, RPG).
+
+Input Data:
+${JSON.stringify(items.map(i => ({ title: i.title, maker: i.maker })))}`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json'
+      }
+    });
+
+    const translatedArray = JSON.parse(response.text);
+
+    return items.map((item, index) => ({
+      ...item,
+      title: translatedArray[index]?.title || item.title,
+      maker: translatedArray[index]?.maker || item.maker
+    }));
+  } catch (error) {
+    console.error('AI翻訳中にエラーが発生したため、原文（日本語）のまま処理を続行します:', error);
+    return items;
+  }
+}
 
 async function fetchDLsiteData() {
   console.log('Fetching DLsite Global Data...');
@@ -111,7 +157,7 @@ async function fetchDLsiteData() {
   }
 }
 
-// デザインスタイル（一部ラベル調整）
+// デザインスタイル
 const commonStyle = `
   * { box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f5f7fa; color: #333; margin: 0; padding: 0; line-height: 1.5; }
@@ -202,12 +248,15 @@ function generateHTML(title, description, items, breadcrumbs) {
 }
 
 async function main() {
-  const items = await fetchDLsiteData();
+  const rawItems = await fetchDLsiteData();
 
-  if (items.length === 0) {
+  if (rawItems.length === 0) {
     console.log('No data fetched. Aborting build process.');
     return;
   }
+
+  // スクレイピング後にGemini APIで自動翻訳を実行
+  const items = await translateItemsToEnglish(rawItems);
 
   const publicDir = path.join(process.cwd(), 'public');
   const asmrDir = path.join(publicDir, 'asmr');
@@ -320,7 +369,7 @@ Sitemap: ${DOMAIN}/sitemap.xml`;
 
   fs.writeFileSync(path.join(publicDir, 'data.json'), JSON.stringify(items, null, 2));
 
-  console.log('Build complete: DLsite Global (EN) static pages generated.');
+  console.log('Build complete: DLsite Global (EN) static pages generated with AI translation.');
 }
 
 main();

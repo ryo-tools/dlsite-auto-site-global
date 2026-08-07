@@ -28,6 +28,8 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run Build Script (Generate Global SEO Pages)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: node scripts/fetch-dlsite.js
 
       - name: Post to Bluesky (Global Auto-Post)
