@@ -3,10 +3,11 @@ import path from 'path';
 import { chromium } from 'playwright';
 
 const AFFILIATE_ID = 'yofukashireview';
-const DOMAIN = 'https://dlsite-auto-site.pages.dev';
+// 海外版のドメイン（Cloudflare Pages等のURLに合わせて適宜変更してください）
+const DOMAIN = 'https://dlsite-auto-site-global.pages.dev';
 
 async function fetchDLsiteData() {
-  console.log('DLsiteデータ取得開始...');
+  console.log('Fetching DLsite Global Data...');
   
   const browser = await chromium.launch({
     headless: true,
@@ -20,7 +21,7 @@ async function fetchDLsiteData() {
   const context = await browser.newContext({
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
     viewport: { width: 1280, height: 800 },
-    locale: 'ja-JP'
+    locale: 'en-US'
   });
 
   const page = await context.newPage();
@@ -29,14 +30,16 @@ async function fetchDLsiteData() {
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
   });
 
+  // 英語設定Cookieおよび年齢認証
   await context.addCookies([
     { name: 'adultchecked', value: '1', domain: '.dlsite.com', path: '/' },
-    { name: 'work_view_option', value: '1', domain: '.dlsite.com', path: '/' }
+    { name: 'work_view_option', value: '1', domain: '.dlsite.com', path: '/' },
+    { name: 'locale', value: 'en_US', domain: '.dlsite.com', path: '/' }
   ]);
 
   try {
-    console.log('ページへアクセス中...');
-    await page.goto('https://www.dlsite.com/maniax/new', { waitUntil: 'domcontentloaded', timeout: 60000 });
+    console.log('Navigating to DLsite (EN)...');
+    await page.goto('https://www.dlsite.com/maniax/new?locale=en_US', { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForTimeout(2000);
 
     const items = await page.evaluate((affiliateId) => {
@@ -50,13 +53,12 @@ async function fetchDLsiteData() {
         let rawLink = linkEl.getAttribute('href') || '';
         if (!rawLink) return;
 
-        // URL全体からRJ番号を確実に抽出
         const rjMatch = rawLink.match(/(RJ[0-9]+)/i);
         if (!rjMatch) return;
 
         const rjCode = rjMatch[1].toUpperCase();
 
-        // dlaf.jp 形式のアフィリエイトURLを確定生成
+        // dlaf.jp 形式のアフィリエイトURL
         const finalLink = `https://dlaf.jp/home/dlaf/=/t/s/link/work/aid/${affiliateId}/id/${rjCode}.html`;
 
         // 画像URL構築
@@ -69,7 +71,7 @@ async function fetchDLsiteData() {
         const container = linkEl.closest('tr') || linkEl.closest('.work_thumb_box') || linkEl.closest('li') || linkEl.parentElement.parentElement;
 
         let maker = 'DLsite';
-        let price = '価格情報なし';
+        let price = 'Price N/A';
         let workType = '';
 
         if (container) {
@@ -79,7 +81,6 @@ async function fetchDLsiteData() {
           const priceEl = container.querySelector('.price, .work_price, .price_default');
           if (priceEl) price = priceEl.innerText.trim();
 
-          // DLsiteの作品種別タグ/アイコン要素を取得（.work_category, .work_genre, .work_type, アイコン等）
           const typeEl = container.querySelector('.work_category, .work_genre, .work_type, .work_img_icon span, .icon_work_type');
           if (typeEl) workType = typeEl.innerText.trim();
         }
@@ -88,7 +89,7 @@ async function fetchDLsiteData() {
           list.push({
             title: titleText,
             link: finalLink,
-            rawLink: `https://www.dlsite.com/maniax/work/=/product_id/${rjCode}.html`,
+            rawLink: `https://www.dlsite.com/maniax/work/=/product_id/${rjCode}.html?locale=en_US`,
             maker: maker,
             image: imgUrl || 'https://www.dlsite.com/images/web/common/no_image/no_image_200x200.gif',
             price: price,
@@ -100,17 +101,17 @@ async function fetchDLsiteData() {
       return list;
     }, AFFILIATE_ID);
 
-    console.log(`取得成功: ${items.length} 件`);
+    console.log(`Successfully fetched: ${items.length} items`);
     return items;
   } catch (error) {
-    console.error('データ取得エラー:', error);
+    console.error('Data fetch error:', error);
     return [];
   } finally {
     await browser.close();
   }
 }
 
-// 青系デザインスタイル
+// デザインスタイル（一部ラベル調整）
 const commonStyle = `
   * { box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f5f7fa; color: #333; margin: 0; padding: 0; line-height: 1.5; }
@@ -143,7 +144,7 @@ function generateHTML(title, description, items, breadcrumbs) {
   ).join('');
 
   return `<!DOCTYPE html>
-<html lang="ja">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -157,11 +158,11 @@ function generateHTML(title, description, items, breadcrumbs) {
     <h1>${title}</h1>
   </header>
   <nav class="categories">
-    <a href="/">総合最新</a>
-    <a href="/asmr/">音声・ASMR</a>
-    <a href="/manga/">マンガ・コミック</a>
-    <a href="/game/">ゲーム作品</a>
-    <a href="/cg/">CG集・イラスト</a>
+    <a href="/">All New</a>
+    <a href="/asmr/">Voice / ASMR</a>
+    <a href="/manga/">Manga & Comic</a>
+    <a href="/game/">Games</a>
+    <a href="/cg/">CG & Illustrations</a>
   </nav>
 
   <div class="breadcrumb">
@@ -179,7 +180,7 @@ function generateHTML(title, description, items, breadcrumbs) {
             <div class="card-title">${item.title}</div>
             <div class="card-maker">${item.maker}</div>
             <div class="card-price">${item.price}</div>
-            <a href="${item.link}" class="btn" target="_blank" rel="noopener noreferrer">DLsiteで見る</a>
+            <a href="${item.link}" class="btn" target="_blank" rel="noopener noreferrer">View on DLsite</a>
           </div>
         </div>
       `).join('')}
@@ -188,13 +189,13 @@ function generateHTML(title, description, items, breadcrumbs) {
 
   <footer>
     <p>
-      <a href="/">トップページ</a> | 
-      <a href="/asmr/">音声・ASMR</a> | 
-      <a href="/manga/">マンガ</a> | 
-      <a href="/game/">ゲーム</a> | 
-      <a href="/cg/">CG集</a>
+      <a href="/">Home</a> | 
+      <a href="/asmr/">Voice / ASMR</a> | 
+      <a href="/manga/">Manga</a> | 
+      <a href="/game/">Games</a> | 
+      <a href="/cg/">CG Collections</a>
     </p>
-    <p>&copy; 2026 DLsiteおすすめ作品まとめ</p>
+    <p>&copy; 2026 DLsite Recommended Works Hub</p>
   </footer>
 </body>
 </html>`;
@@ -204,7 +205,7 @@ async function main() {
   const items = await fetchDLsiteData();
 
   if (items.length === 0) {
-    console.log('データが取得できなかったためビルドを中断します。');
+    console.log('No data fetched. Aborting build process.');
     return;
   }
 
@@ -220,68 +221,68 @@ async function main() {
   if (!fs.existsSync(gameDir)) fs.mkdirSync(gameDir, { recursive: true });
   if (!fs.existsSync(cgDir)) fs.mkdirSync(cgDir, { recursive: true });
 
-  // 1. トップページ（総合）
+  // 1. トップページ
   const topHTML = generateHTML(
-    'DLsiteおすすめ作品まとめ | 毎日更新ナビ',
-    'DLsiteの最新人気作品を毎日自動更新でお届けします。全ジャンルの注目作品をチェック！',
+    'DLsite Global Works Hub | Daily Updates',
+    'Explore the latest and popular works on DLsite including ASMR, Manga, Games, and CGs. Updated daily!',
     items,
-    [{ name: 'ホーム', path: '/' }]
+    [{ name: 'Home', path: '/' }]
   );
   fs.writeFileSync(path.join(publicDir, 'index.html'), topHTML);
 
-  // 2. 音声・ASMR特化（DLsite公式形式：ボイス・ASMR, ボイス, 音楽, 朗読等）
-  const asmrKeywords = ['ボイス・ASMR', 'ボイス', 'ASMR', '音声', '耳かき', '睡眠', '囁き', '耳攻め', '癒やし', 'バイノーラル', '朗読', 'ドラマ', 'シチュエーション', 'ボイスドラマ', '音楽'];
+  // 2. Voice / ASMR
+  const asmrKeywords = ['Voice', 'ASMR', 'Audio', 'Sound', 'ボイス', '音声', '耳かき', '睡眠', '癒やし', 'Music', 'Drama'];
   const asmrItems = items.filter(item => 
     asmrKeywords.some(kw => item.title.includes(kw) || item.maker.includes(kw) || item.workType.includes(kw))
   );
   const asmrHTML = generateHTML(
-    'DLsite 音声・ASMRおすすめまとめ | 毎日更新ナビ',
-    'DLsiteで人気のASMR・同人音声作品を厳選してお届け。安眠系・耳かき・シチュエーションボイスなど最新作品を毎日更新！',
+    'DLsite Voice & ASMR Recommendations | Daily Hub',
+    'Handpicked popular ASMR and audio works from DLsite. Find your best sleep sounds and voice dramas!',
     asmrItems.length > 0 ? asmrItems : items,
-    [{ name: 'ホーム', path: '/' }, { name: '音声・ASMR特化', path: '/asmr/' }]
+    [{ name: 'Home', path: '/' }, { name: 'Voice & ASMR', path: '/asmr/' }]
   );
   fs.writeFileSync(path.join(asmrDir, 'index.html'), asmrHTML);
 
-  // 3. マンガ・コミック特化（DLsite公式形式：マンガ, コミック, 劇画等）
-  const mangaKeywords = ['マンガ', 'コミック', '漫画', '同人誌', '単行本', '総集編', '劇画', 'フルカラー', 'カラー', '描き下ろし'];
+  // 3. Manga & Comic
+  const mangaKeywords = ['Manga', 'Comic', 'Doujinshi', 'マンガ', 'コミック', '漫画', '同人誌'];
   const mangaItems = items.filter(item => 
     mangaKeywords.some(kw => item.title.includes(kw) || item.maker.includes(kw) || item.workType.includes(kw))
   );
   const mangaHTML = generateHTML(
-    'DLsite 同人マンガおすすめまとめ | 毎日更新ナビ',
-    'DLsiteで人気の同人マンガ・コミック作品を厳選してお届け。話題の新作コミックを毎日更新！',
+    'DLsite Doujin Manga & Comics | Daily Hub',
+    'Popular doujin manga and comic releases from DLsite. Discover trending new indie comics daily!',
     mangaItems.length > 0 ? mangaItems : items,
-    [{ name: 'ホーム', path: '/' }, { name: 'マンガ・コミック', path: '/manga/' }]
+    [{ name: 'Home', path: '/' }, { name: 'Manga & Comic', path: '/manga/' }]
   );
   fs.writeFileSync(path.join(mangaDir, 'index.html'), mangaHTML);
 
-  // 4. ゲーム特化（DLsite公式形式：ゲーム, ロールプレイング, アクション, アドベンチャー等）
-  const gameKeywords = ['ゲーム', 'ロールプレイング', 'アクション', 'アドベンチャー', 'シミュレーション', 'RPG', 'ACT', 'SLG', 'ADV', 'ノベル', '体験版', 'STG', 'パズル', 'ハクスラ', '3D', '2D', 'ダンジョン', '脱出', '育成', '同人ゲーム'];
+  // 4. Games
+  const gameKeywords = ['Game', 'RPG', 'ACT', 'SLG', 'ADV', 'Novel', '3D', '2D', 'ゲーム', 'アクション', 'アドベンチャー'];
   const gameItems = items.filter(item => 
     gameKeywords.some(kw => item.title.includes(kw) || item.maker.includes(kw) || item.workType.includes(kw))
   );
   const gameHTML = generateHTML(
-    'DLsite 同人ゲームおすすめまとめ | 毎日更新ナビ',
-    'DLsiteで人気の同人ゲーム・長編RPG・アクション作品を厳選してお届け。話題の新作ゲームを毎日更新！',
+    'DLsite Indie Games Recommendations | Daily Hub',
+    'Top doujin games, RPGs, and action titles from DLsite. Discover great indie games updated daily!',
     gameItems.length > 0 ? gameItems : items,
-    [{ name: 'ホーム', path: '/' }, { name: 'ゲーム作品', path: '/game/' }]
+    [{ name: 'Home', path: '/' }, { name: 'Games', path: '/game/' }]
   );
   fs.writeFileSync(path.join(gameDir, 'index.html'), gameHTML);
 
-  // 5. CG集・イラスト特化（DLsite公式形式：CG・イラスト, CG集等）
-  const cgKeywords = ['CG・イラスト', 'CG集', 'CG', 'イラスト', '画集', '原画集', '立ち絵', '素材', '差分'];
+  // 5. CG & Illustrations
+  const cgKeywords = ['CG', 'Illustration', 'Artbook', 'イラスト', '画像', '画集'];
   const cgItems = items.filter(item => 
     cgKeywords.some(kw => item.title.includes(kw) || item.maker.includes(kw) || item.workType.includes(kw))
   );
   const cgHTML = generateHTML(
-    'DLsite CG集・イラストおすすめまとめ | 毎日更新ナビ',
-    'DLsiteで人気のCG集・イラスト・画像作品を厳選してお届け。高画質CG集の新作を毎日更新！',
+    'DLsite CG & Illustration Collections | Daily Hub',
+    'High quality CG sets and illustration archives from DLsite. Check out the latest artworks!',
     cgItems.length > 0 ? cgItems : items,
-    [{ name: 'ホーム', path: '/' }, { name: 'CG集・イラスト', path: '/cg/' }]
+    [{ name: 'Home', path: '/' }, { name: 'CG & Illustrations', path: '/cg/' }]
   );
   fs.writeFileSync(path.join(cgDir, 'index.html'), cgHTML);
 
-  // 6. SEO用 sitemap.xml & robots.txt
+  // 6. SEO XML
   const sitemapXML = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
@@ -317,10 +318,9 @@ Allow: /
 Sitemap: ${DOMAIN}/sitemap.xml`;
   fs.writeFileSync(path.join(publicDir, 'robots.txt'), robotsTxt);
 
-  // 最新データをJSONとしても保存
   fs.writeFileSync(path.join(publicDir, 'data.json'), JSON.stringify(items, null, 2));
 
-  console.log('ビルド完了: DLsite公式形式名対応でカテゴリ振り分け精度を向上。');
+  console.log('Build complete: DLsite Global (EN) static pages generated.');
 }
 
 main();

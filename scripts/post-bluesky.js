@@ -4,30 +4,38 @@ import { BskyAgent, RichText } from '@atproto/api';
 
 const HANDLE = process.env.BLUESKY_HANDLE;
 const PASSWORD = process.env.BLUESKY_PASSWORD;
-const SITE_URL = 'https://dlsite-auto-site.pages.dev/asmr/';
+// グローバル版のASMRカテゴリページURL
+const SITE_URL = 'https://dlsite-auto-site-global.pages.dev/asmr/';
 
 async function postToBluesky() {
   if (!HANDLE || !PASSWORD) {
-    console.log('Blueskyのログイン情報が未設定のため投稿をスキップします。');
+    console.log('Bluesky credentials not found. Skipping post.');
     return;
   }
 
   const jsonPath = path.join(process.cwd(), 'public', 'data.json');
   if (!fs.existsSync(jsonPath)) {
-    console.log('data.json が見つからないため投稿をスキップします。');
+    console.log('data.json not found. Skipping post.');
     return;
   }
 
   const items = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
   if (!items || items.length === 0) {
-    console.log('投稿対象の作品データがありません。');
+    console.log('No items found to post.');
     return;
   }
 
-  // ASMR・音声作品に絞り込み
-  const asmrKeywords = ['ASMR', '音声', 'ボイス', '耳かき', '睡眠', '囁き', '耳攻め', '癒やし', 'バイノーラル', 'シチュエーション'];
+  // 英語・日本語の両方でASMR・音声作品を絞り込み
+  const asmrKeywords = [
+    'ASMR', 'Voice', 'Audio', 'Sound', 'Relaxing', 'Sleep', 'Drama',
+    'ボイス', '音声', '耳かき', '睡眠', '囁き', '耳攻め', '癒やし', 'バイノーラル', 'シチュエーション'
+  ];
   const asmrItems = items.filter(item => 
-    asmrKeywords.some(kw => item.title.includes(kw) || item.maker.includes(kw))
+    asmrKeywords.some(kw => 
+      (item.title || '').toUpperCase().includes(kw.toUpperCase()) || 
+      (item.maker || '').toUpperCase().includes(kw.toUpperCase()) ||
+      (item.workType || '').toUpperCase().includes(kw.toUpperCase())
+    )
   );
 
   const targetPool = asmrItems.length > 0 ? asmrItems : items;
@@ -40,14 +48,14 @@ async function postToBluesky() {
 
   try {
     await agent.login({ identifier: HANDLE, password: PASSWORD });
-    console.log('Blueskyログイン成功');
+    console.log('Bluesky login successful.');
 
     let thumbBlob = undefined;
 
     // サムネイル画像のアップロード
     if (topItem.image && topItem.image.startsWith('http')) {
       try {
-        console.log(`画像をダウンロード中: ${topItem.image}`);
+        console.log(`Downloading thumbnail: ${topItem.image}`);
         const response = await fetch(topItem.image, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
@@ -64,27 +72,27 @@ async function postToBluesky() {
           });
 
           thumbBlob = uploadRes.data.blob;
-          console.log('サムネイル画像のアップロード成功！');
+          console.log('Thumbnail uploaded successfully!');
         }
       } catch (imgError) {
-        console.error('画像アップロードに失敗（テキストカードのみで続行します）:', imgError);
+        console.error('Image upload failed (continuing with text card):', imgError);
       }
     }
 
-    // 2. クリック率を高めるキャッチコピーのランダム付与
+    // 2. 英語のキャッチコピーをランダム選択
     const hooks = [
-      '🎧【おすすめASMR】今夜の安眠・作業用に',
-      '✨【注目作品】話題のDLsite音声・ASMR',
-      '🌙【耳元ボイス】極上の癒やし体験ピックアップ',
-      '🔥【最新セール・新作】おすすめ同人ASMR'
+      '🎧【Recommended ASMR】Perfect Japanese voice work for sleep & relaxation',
+      '✨【Trending Work】Popular DLsite ASMR & Voice Drama',
+      '🌙【Relaxing Audio】Soothing ear-whispering experience',
+      '🔥【Featured DLsite ASMR】Top pick Japanese voice work'
     ];
     const selectedHook = hooks[Math.floor(Math.random() * hooks.length)];
 
     // タイトルの長さを調整（文字数オーバー防止）
-    const displayTitle = topItem.title.length > 40 ? topItem.title.substring(0, 37) + '...' : topItem.title;
+    const displayTitle = topItem.title.length > 50 ? topItem.title.substring(0, 47) + '...' : topItem.title;
 
-    // 本文テキスト構築（自サイトへ誘導）
-    const rawText = `${selectedHook}\n\n『${displayTitle}』\nサークル：${topItem.maker}\n価格：${topItem.price}\n\n👇試聴・詳細・作品一覧はこちら\n${SITE_URL}`;
+    // 本文テキスト構築（英語ベース）
+    const rawText = `${selectedHook}\n\n『${displayTitle}』\nCircle: ${topItem.maker}\nPrice: ${topItem.price}\n\n👇 Listen preview & check details here\n${SITE_URL}`;
     
     const rt = new RichText({ text: rawText });
     await rt.detectFacets(agent);
@@ -98,7 +106,7 @@ async function postToBluesky() {
         external: {
           uri: SITE_URL,
           title: `【ASMR】${displayTitle}`,
-          description: `サークル: ${topItem.maker} | 価格: ${topItem.price} - DLsiteおすすめASMR・同人音声まとめ`,
+          description: `Circle: ${topItem.maker} | Price: ${topItem.price} - Recommended DLsite Voice & ASMR Hub`,
           thumb: thumbBlob
         }
       },
@@ -113,9 +121,9 @@ async function postToBluesky() {
 
     await agent.post(postPayload);
 
-    console.log(`BlueskyへのASMR作品投稿完了: ${topItem.title}`);
+    console.log(`Bluesky post complete (Global): ${topItem.title}`);
   } catch (error) {
-    console.error('Bluesky投稿エラー:', error);
+    console.error('Bluesky post error:', error);
   }
 }
 

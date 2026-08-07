@@ -1,8 +1,8 @@
-name: Auto Build DLsite Site
+name: Auto Build DLsite Global Site
 
 on:
   schedule:
-    - cron: '0 13 * * *' # 日本時間 毎日22:00
+    - cron: '0 13 * * *' # 日本時間 毎日22:00 (UTC 13:00)
   workflow_dispatch:
 
 jobs:
@@ -27,10 +27,10 @@ jobs:
       - name: Install Playwright Browsers
         run: npx playwright install --with-deps chromium
 
-      - name: Run Build Script (Generate SEO Pages)
+      - name: Run Build Script (Generate Global SEO Pages)
         run: node scripts/fetch-dlsite.js
 
-      - name: Post to Bluesky (Free SNS Auto-Post)
+      - name: Post to Bluesky (Global Auto-Post)
         env:
           BLUESKY_HANDLE: ${{ secrets.BLUESKY_HANDLE }}
           BLUESKY_PASSWORD: ${{ secrets.BLUESKY_PASSWORD }}
@@ -43,9 +43,9 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto update DLsite SEO content [skip ci]" && git pull --rebase origin main && git push origin main)
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto update DLsite Global content [skip ci]" && git pull --rebase origin main && git push origin main)
 
-      - name: Notify Discord for X Post Stock (with Image)
+      - name: Notify Discord for X Post Stock Global (with Image)
         if: success()
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
