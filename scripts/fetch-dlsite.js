@@ -10,22 +10,23 @@ const DOMAIN = 'https://dlsite-auto-site-global.pages.dev';
 const apiKey = process.env.GEMINI_API_KEY;
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
-// 作品タイトルとサークル名を英語に翻訳する関数
+// 作品タイトルとサークル名を自然な英語へ補正・翻訳する関数
 async function translateItemsToEnglish(items) {
   if (!ai || items.length === 0) {
     console.log('GEMINI_API_KEY 未設定またはデータなしのため、AI翻訳をスキップして続行します。');
     return items;
   }
 
-  console.log('Gemini APIを使って作品タイトルとサークル名を英語に翻訳中...');
+  console.log('Gemini APIを使って作品タイトルとサークル名を英語に最適化中...');
 
   const prompt = `You are a professional translator for anime, manga, ASMR, and Japanese doujin content.
-Translate the following Japanese product titles and creator/circle names into natural, high-converting English for overseas fans.
+Translate or polish the following product titles and creator/circle names into natural, high-converting English for overseas fans.
 
 STRICT RULES:
 1. Return ONLY a JSON array containing objects with translated "title" and "maker".
-2. Maintain the exact same array order as input.
-3. Use consistent English terminology (e.g., ASMR, Voice Drama, Ear Cleaning, Whispers, Doujinshi, RPG).
+2. Do NOT contain Japanese kanji/hiragana/katakana in the output.
+3. Maintain the exact same array order as input.
+4. Use consistent English terminology (e.g., ASMR, Voice Drama, Ear Cleaning, Whispers, Doujinshi, RPG).
 
 Input Data:
 ${JSON.stringify(items.map(i => ({ title: i.title, maker: i.maker })))}`;
@@ -47,13 +48,13 @@ ${JSON.stringify(items.map(i => ({ title: i.title, maker: i.maker })))}`;
       maker: translatedArray[index]?.maker || item.maker
     }));
   } catch (error) {
-    console.error('AI翻訳中にエラーが発生したため、原文（日本語）のまま処理を続行します:', error);
+    console.error('AI翻訳中にエラーが発生したため、取得データ（英語版）のまま処理を続行します:', error);
     return items;
   }
 }
 
 async function fetchDLsiteData() {
-  console.log('Fetching DLsite Global Data...');
+  console.log('Fetching DLsite Global Data (ENG Portal)...');
   
   const browser = await chromium.launch({
     headless: true,
@@ -80,17 +81,19 @@ async function fetchDLsiteData() {
   await context.addCookies([
     { name: 'adultchecked', value: '1', domain: '.dlsite.com', path: '/' },
     { name: 'work_view_option', value: '1', domain: '.dlsite.com', path: '/' },
-    { name: 'locale', value: 'en_US', domain: '.dlsite.com', path: '/' }
+    { name: 'locale', value: 'en_US', domain: '.dlsite.com', path: '/' },
+    { name: '_lang', value: 'en-us', domain: '.dlsite.com', path: '/' }
   ]);
 
   try {
-    console.log('Navigating to DLsite (EN)...');
-    await page.goto('https://www.dlsite.com/maniax/new?locale=en_US', { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await page.waitForTimeout(2000);
+    console.log('Navigating to DLsite Global Portal (ENG)...');
+    // 日本語版 (maniax) ではなく 英語版ポータル (eng/new) に直接アクセス
+    await page.goto('https://www.dlsite.com/eng/new', { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForTimeout(3000);
 
     const items = await page.evaluate((affiliateId) => {
       const list = [];
-      const titleLinks = document.querySelectorAll('.work_name a, .work_title a, dt.work_name a');
+      const titleLinks = document.querySelectorAll('.work_name a, .work_title a, dt.work_name a, .multilingual_title a');
 
       titleLinks.forEach(linkEl => {
         const titleText = linkEl.innerText ? linkEl.innerText.trim() : '';
@@ -107,35 +110,45 @@ async function fetchDLsiteData() {
         // dlaf.jp 形式のアフィリエイトURL
         const finalLink = `https://dlaf.jp/home/dlaf/=/t/s/link/work/aid/${affiliateId}/id/${rjCode}.html`;
 
-        // 画像URL構築
-        const digits = rjCode.replace('RJ', '');
-        const num = parseInt(digits, 10);
-        const rounded = Math.ceil(num / 1000) * 1000;
-        const folder = 'RJ' + String(rounded).padStart(digits.length, '0');
-        const imgUrl = `https://img.dlsite.jp/modpub/images2/work/doujin/${folder}/${rjCode}_img_main.jpg`;
-
-        const container = linkEl.closest('tr') || linkEl.closest('.work_thumb_box') || linkEl.closest('li') || linkEl.parentElement.parentElement;
+        const container = linkEl.closest('tr') || linkEl.closest('.work_thumb_box') || linkEl.closest('li') || linkEl.closest('.work_1col') || linkEl.parentElement.parentElement;
 
         let maker = 'DLsite';
         let price = 'Price N/A';
         let workType = '';
+        let imgUrl = '';
 
         if (container) {
-          const makerEl = container.querySelector('.maker_name a, .author a, .maker a');
+          const makerEl = container.querySelector('.maker_name a, .author a, .maker a, .sub_title a');
           if (makerEl) maker = makerEl.innerText.trim();
 
-          const priceEl = container.querySelector('.price, .work_price, .price_default');
+          const priceEl = container.querySelector('.price, .work_price, .price_default, .strike_price');
           if (priceEl) price = priceEl.innerText.trim();
 
           const typeEl = container.querySelector('.work_category, .work_genre, .work_type, .work_img_icon span, .icon_work_type');
           if (typeEl) workType = typeEl.innerText.trim();
+
+          // DOM上の実際に表示されている英語版画像要素を優先取得
+          const imgEl = container.querySelector('img');
+          if (imgEl) {
+            imgUrl = imgEl.getAttribute('data-src') || imgEl.getAttribute('src') || '';
+            if (imgUrl.startsWith('//')) imgUrl = 'https:' + imgUrl;
+          }
+        }
+
+        // DOMからの取得に失敗した場合はフォールバック
+        if (!imgUrl) {
+          const digits = rjCode.replace('RJ', '');
+          const num = parseInt(digits, 10);
+          const rounded = Math.ceil(num / 1000) * 1000;
+          const folder = 'RJ' + String(rounded).padStart(digits.length, '0');
+          imgUrl = `https://img.dlsite.jp/modpub/images2/work/doujin/${folder}/${rjCode}_img_main.jpg`;
         }
 
         if (!list.some(i => i.link === finalLink)) {
           list.push({
             title: titleText,
             link: finalLink,
-            rawLink: `https://www.dlsite.com/maniax/work/=/product_id/${rjCode}.html?locale=en_US`,
+            rawLink: `https://www.dlsite.com/eng/work/=/product_id/${rjCode}.html`,
             maker: maker,
             image: imgUrl || 'https://www.dlsite.com/images/web/common/no_image/no_image_200x200.gif',
             price: price,
@@ -255,7 +268,7 @@ async function main() {
     return;
   }
 
-  // スクレイピング後にGemini APIで自動翻訳を実行
+  // 取得データをGemini APIで最終クリーンアップ（英語への統一処理）
   const items = await translateItemsToEnglish(rawItems);
 
   const publicDir = path.join(process.cwd(), 'public');
@@ -280,9 +293,9 @@ async function main() {
   fs.writeFileSync(path.join(publicDir, 'index.html'), topHTML);
 
   // 2. Voice / ASMR
-  const asmrKeywords = ['Voice', 'ASMR', 'Audio', 'Sound', 'ボイス', '音声', '耳かき', '睡眠', '癒やし', 'Music', 'Drama'];
+  const asmrKeywords = ['Voice', 'ASMR', 'Audio', 'Sound', '耳かき', '睡眠', '癒やし', 'Music', 'Drama', 'Whisper'];
   const asmrItems = items.filter(item => 
-    asmrKeywords.some(kw => item.title.includes(kw) || item.maker.includes(kw) || item.workType.includes(kw))
+    asmrKeywords.some(kw => item.title.toLowerCase().includes(kw.toLowerCase()) || item.maker.toLowerCase().includes(kw.toLowerCase()) || item.workType.toLowerCase().includes(kw.toLowerCase()))
   );
   const asmrHTML = generateHTML(
     'DLsite Voice & ASMR Recommendations | Daily Hub',
@@ -293,9 +306,9 @@ async function main() {
   fs.writeFileSync(path.join(asmrDir, 'index.html'), asmrHTML);
 
   // 3. Manga & Comic
-  const mangaKeywords = ['Manga', 'Comic', 'Doujinshi', 'マンガ', 'コミック', '漫画', '同人誌'];
+  const mangaKeywords = ['Manga', 'Comic', 'Doujinshi', 'Comic'];
   const mangaItems = items.filter(item => 
-    mangaKeywords.some(kw => item.title.includes(kw) || item.maker.includes(kw) || item.workType.includes(kw))
+    mangaKeywords.some(kw => item.title.toLowerCase().includes(kw.toLowerCase()) || item.maker.toLowerCase().includes(kw.toLowerCase()) || item.workType.toLowerCase().includes(kw.toLowerCase()))
   );
   const mangaHTML = generateHTML(
     'DLsite Doujin Manga & Comics | Daily Hub',
@@ -306,9 +319,9 @@ async function main() {
   fs.writeFileSync(path.join(mangaDir, 'index.html'), mangaHTML);
 
   // 4. Games
-  const gameKeywords = ['Game', 'RPG', 'ACT', 'SLG', 'ADV', 'Novel', '3D', '2D', 'ゲーム', 'アクション', 'アドベンチャー'];
+  const gameKeywords = ['Game', 'RPG', 'ACT', 'SLG', 'ADV', 'Novel', '3D', '2D'];
   const gameItems = items.filter(item => 
-    gameKeywords.some(kw => item.title.includes(kw) || item.maker.includes(kw) || item.workType.includes(kw))
+    gameKeywords.some(kw => item.title.toLowerCase().includes(kw.toLowerCase()) || item.maker.toLowerCase().includes(kw.toLowerCase()) || item.workType.toLowerCase().includes(kw.toLowerCase()))
   );
   const gameHTML = generateHTML(
     'DLsite Indie Games Recommendations | Daily Hub',
@@ -319,9 +332,9 @@ async function main() {
   fs.writeFileSync(path.join(gameDir, 'index.html'), gameHTML);
 
   // 5. CG & Illustrations
-  const cgKeywords = ['CG', 'Illustration', 'Artbook', 'イラスト', '画像', '画集'];
+  const cgKeywords = ['CG', 'Illustration', 'Artbook'];
   const cgItems = items.filter(item => 
-    cgKeywords.some(kw => item.title.includes(kw) || item.maker.includes(kw) || item.workType.includes(kw))
+    cgKeywords.some(kw => item.title.toLowerCase().includes(kw.toLowerCase()) || item.maker.toLowerCase().includes(kw.toLowerCase()) || item.workType.toLowerCase().includes(kw.toLowerCase()))
   );
   const cgHTML = generateHTML(
     'DLsite CG & Illustration Collections | Daily Hub',
