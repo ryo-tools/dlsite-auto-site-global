@@ -10,23 +10,23 @@ const DOMAIN = 'https://dlsite-auto-site-global.pages.dev';
 const apiKey = process.env.GEMINI_API_KEY;
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
-// 作品タイトルとサークル名を自然な英語へ補正・翻訳する関数
+// 作品タイトルとサークル名を強力に英語へ翻訳・整形する関数
 async function translateItemsToEnglish(items) {
   if (!ai || items.length === 0) {
     console.log('GEMINI_API_KEY 未設定またはデータなしのため、AI翻訳をスキップして続行します。');
     return items;
   }
 
-  console.log('Gemini APIを使って作品タイトルとサークル名を英語に最適化中...');
+  console.log('Gemini APIを使って作品タイトルとサークル名を厳格に英語化中...');
 
-  const prompt = `You are a professional translator for anime, manga, ASMR, and Japanese doujin content.
-Translate or polish the following product titles and creator/circle names into natural, high-converting English for overseas fans.
+  const prompt = `You are a professional translator specializing in Japanese anime, manga, ASMR, and doujin content.
+Translate the following product titles and creator/circle names into clear, natural, high-converting English for an English-speaking audience.
 
-STRICT RULES:
-1. Return ONLY a JSON array containing objects with translated "title" and "maker".
-2. Do NOT contain Japanese kanji/hiragana/katakana in the output.
-3. Maintain the exact same array order as input.
-4. Use consistent English terminology (e.g., ASMR, Voice Drama, Ear Cleaning, Whispers, Doujinshi, RPG).
+STRICT INSTRUCTIONS:
+1. Every single output title and maker name MUST be in English. Do NOT leave any Japanese Kanji, Hiragana, or Katakana.
+2. Return ONLY a JSON array containing objects with keys "title" and "maker".
+3. Maintain the exact same array length and order as input.
+4. Use standard English terms (e.g., ASMR, Voice Drama, Ear Cleaning, Whispers, Doujinshi, RPG).
 
 Input Data:
 ${JSON.stringify(items.map(i => ({ title: i.title, maker: i.maker })))}`;
@@ -48,7 +48,7 @@ ${JSON.stringify(items.map(i => ({ title: i.title, maker: i.maker })))}`;
       maker: translatedArray[index]?.maker || item.maker
     }));
   } catch (error) {
-    console.error('AI翻訳中にエラーが発生したため、取得データ（英語版）のまま処理を続行します:', error);
+    console.error('AI翻訳中にエラーが発生しました:', error);
     return items;
   }
 }
@@ -86,8 +86,8 @@ async function fetchDLsiteData() {
   ]);
 
   try {
-    console.log('Navigating to DLsite Global Portal (ENG)...');
-    // 日本語版 (maniax) ではなく 英語版ポータル (eng/new) に直接アクセス
+    console.log('Navigating to DLsite English Section...');
+    // 英語版ポータル (eng/new) に直接アクセス
     await page.goto('https://www.dlsite.com/eng/new', { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForTimeout(3000);
 
@@ -127,7 +127,7 @@ async function fetchDLsiteData() {
           const typeEl = container.querySelector('.work_category, .work_genre, .work_type, .work_img_icon span, .icon_work_type');
           if (typeEl) workType = typeEl.innerText.trim();
 
-          // DOM上の実際に表示されている英語版画像要素を優先取得
+          // 表示されている画像を優先取得
           const imgEl = container.querySelector('img');
           if (imgEl) {
             imgUrl = imgEl.getAttribute('data-src') || imgEl.getAttribute('src') || '';
@@ -135,7 +135,7 @@ async function fetchDLsiteData() {
           }
         }
 
-        // DOMからの取得に失敗した場合はフォールバック
+        // フォールバック用の画像URL設定
         if (!imgUrl) {
           const digits = rjCode.replace('RJ', '');
           const num = parseInt(digits, 10);
@@ -306,7 +306,7 @@ async function main() {
   fs.writeFileSync(path.join(asmrDir, 'index.html'), asmrHTML);
 
   // 3. Manga & Comic
-  const mangaKeywords = ['Manga', 'Comic', 'Doujinshi', 'Comic'];
+  const mangaKeywords = ['Manga', 'Comic', 'Doujinshi'];
   const mangaItems = items.filter(item => 
     mangaKeywords.some(kw => item.title.toLowerCase().includes(kw.toLowerCase()) || item.maker.toLowerCase().includes(kw.toLowerCase()) || item.workType.toLowerCase().includes(kw.toLowerCase()))
   );
