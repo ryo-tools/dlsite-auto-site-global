@@ -10,6 +10,9 @@ const DOMAIN = 'https://dlsite-auto-site-global.pages.dev';
 const apiKey = process.env.GEMINI_API_KEY;
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
+// 指定ミリ秒待機するヘルパー関数
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 // 現在利用可能な最適（最新）のGeminiモデル名を動的に取得する関数
 async function getBestAvailableModel() {
   if (process.env.GEMINI_MODEL) {
@@ -21,7 +24,6 @@ async function getBestAvailableModel() {
     const modelsResponse = await ai.models.list();
     const models = modelsResponse.models || [];
 
-    // 利用可能なモデルの中から 'flash' を含む安定版モデルを自動検索
     const flashModel = models.find(m => 
       m.name && m.name.includes('flash') && !m.name.includes('experimental')
     );
@@ -35,7 +37,6 @@ async function getBestAvailableModel() {
     console.warn('⚠️ モデル一覧の動的取得に失敗したためフォールバックモデルを使用します:', error.message);
   }
 
-  // 万が一取得失敗した際の安全策フォールバック
   return 'gemini-2.0-flash';
 }
 
@@ -45,7 +46,7 @@ function cleanText(text) {
   return text.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-// 作品タイトルとサークル名を強力に英語へ翻訳・整形する関数
+// 作品タイトルとサークル名を強力に英語へ翻訳・整形する関数（リトライロジック付き）
 async function translateItemsToEnglish(items) {
   if (!ai) {
     console.log('⚠️ GEMINI_API_KEY が検出されませんでした。AI翻訳をスキップします。');
@@ -54,9 +55,7 @@ async function translateItemsToEnglish(items) {
 
   if (items.length === 0) return items;
 
-  // 利用可能なモデルを自動取得
   const activeModel = await getBestAvailableModel();
-
   console.log(`🌐 Gemini API (${activeModel}) で ${items.length} 件のデータ翻訳を開始します...`);
 
   const sanitizedInput = items.map(i => ({
@@ -76,36 +75,51 @@ STRICT INSTRUCTIONS:
 Input Data:
 ${JSON.stringify(sanitizedInput)}`;
 
-  try {
-    const response = await ai.models.generateContent({
-      model: activeModel,
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json'
+  // レートリミット対策（最大3回リトライ）
+  const maxRetries = 3;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await ai.models.generateContent({
+        model: activeModel,
+        contents: prompt,
+        config: {
+          responseMimeType: 'application/json'
+        }
+      });
+
+      console.log('--- Gemini API Raw Response ---');
+      console.log(response.text);
+      console.log('-------------------------------');
+
+      const translatedArray = JSON.parse(response.text);
+
+      if (Array.isArray(translatedArray) && translatedArray.length === items.length) {
+        console.log('✅ Gemini APIによる英文翻訳が完了しました！');
+        return items.map((item, index) => ({
+          ...item,
+          title: cleanText(translatedArray[index]?.title) || item.title,
+          maker: cleanText(translatedArray[index]?.maker) || item.maker
+        }));
+      } else {
+        console.warn('⚠️ 翻訳結果の要素数が一致しないため原文を保持します。');
+        return items;
       }
-    });
-
-    console.log('--- Gemini API Raw Response ---');
-    console.log(response.text);
-    console.log('-------------------------------');
-
-    const translatedArray = JSON.parse(response.text);
-
-    if (Array.isArray(translatedArray) && translatedArray.length === items.length) {
-      console.log('✅ Gemini APIによる英文翻訳が完了しました！');
-      return items.map((item, index) => ({
-        ...item,
-        title: cleanText(translatedArray[index]?.title) || item.title,
-        maker: cleanText(translatedArray[index]?.maker) || item.maker
-      }));
-    } else {
-      console.warn('⚠️ 翻訳結果の要素数が一致しないため原文を保持します。');
-      return items;
+    } catch (error) {
+      console.error(`❌ Gemini API呼び出しエラー (試行 ${attempt}/${maxRetries}):`, error.message);
+      
+      // Rate Limit (429) エラーの場合は待機してリトライ
+      if (attempt < maxRetries) {
+        const waitTime = 10000; // 10秒待機
+        console.log(`⏳ レート制限を回避するため ${waitTime / 1000} 秒待機して再試行します...`);
+        await sleep(waitTime);
+      } else {
+        console.error('❌ 最大リトライ回数に達したため、原文のまま処理を続行します。');
+        return items;
+      }
     }
-  } catch (error) {
-    console.error('❌ Gemini API呼び出し中にエラーが発生しました:', error);
-    return items;
   }
+
+  return items;
 }
 
 async function fetchDLsiteData() {
