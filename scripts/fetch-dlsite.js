@@ -10,8 +10,27 @@ const DOMAIN = 'https://dlsite-auto-site-global.pages.dev';
 const apiKey = process.env.GEMINI_API_KEY;
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
-// 指定ミリ秒待機するヘルパー関数
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// テキストの不必要な改行や特殊文字をクリーンアップする関数
+function cleanText(text) {
+  if (!text) return '';
+  return text.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+// 無料のGoogle Translate APIエンドポイント（Gemini上限時のフォールバック用）
+async function fallbackTranslate(text) {
+  if (!text) return '';
+  try {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=ja&tl=en&dt=t&q=${encodeURIComponent(text)}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data && data[0] && data[0][0] && data[0][0][0]) {
+      return cleanText(data[0][0][0]);
+    }
+  } catch (e) {
+    console.error('Fallback translate failed:', e.message);
+  }
+  return text;
+}
 
 // 現在利用可能な最適（最新）のGeminiモデル名を動的に取得する関数
 async function getBestAvailableModel() {
@@ -40,30 +59,20 @@ async function getBestAvailableModel() {
   return 'gemini-2.0-flash';
 }
 
-// テキストの不必要な改行や特殊文字をクリーンアップする関数
-function cleanText(text) {
-  if (!text) return '';
-  return text.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-// 作品タイトルとサークル名を強力に英語へ翻訳・整形する関数（リトライロジック付き）
+// 作品タイトルとサークル名を英語へ翻訳・整形する関数（Gemini API ➔ 上限時はGoogle Translateへ自動フォールバック）
 async function translateItemsToEnglish(items) {
-  if (!ai) {
-    console.log('⚠️ GEMINI_API_KEY が検出されませんでした。AI翻訳をスキップします。');
-    return items;
-  }
-
   if (items.length === 0) return items;
-
-  const activeModel = await getBestAvailableModel();
-  console.log(`🌐 Gemini API (${activeModel}) で ${items.length} 件のデータ翻訳を開始します...`);
 
   const sanitizedInput = items.map(i => ({
     title: cleanText(i.title),
     maker: cleanText(i.maker)
   }));
 
-  const prompt = `You are a professional translator specializing in Japanese anime, manga, ASMR, and doujin content.
+  if (ai) {
+    const activeModel = await getBestAvailableModel();
+    console.log(`🌐 Gemini API (${activeModel}) で ${items.length} 件のデータ翻訳を開始します...`);
+
+    const prompt = `You are a professional translator specializing in Japanese anime, manga, ASMR, and doujin content.
 Translate the following product titles and creator/circle names into clear, natural, high-converting English for an English-speaking audience.
 
 STRICT INSTRUCTIONS:
@@ -75,9 +84,6 @@ STRICT INSTRUCTIONS:
 Input Data:
 ${JSON.stringify(sanitizedInput)}`;
 
-  // レートリミット対策（最大3回リトライ）
-  const maxRetries = 3;
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       const response = await ai.models.generateContent({
         model: activeModel,
@@ -100,26 +106,26 @@ ${JSON.stringify(sanitizedInput)}`;
           title: cleanText(translatedArray[index]?.title) || item.title,
           maker: cleanText(translatedArray[index]?.maker) || item.maker
         }));
-      } else {
-        console.warn('⚠️ 翻訳結果の要素数が一致しないため原文を保持します。');
-        return items;
       }
     } catch (error) {
-      console.error(`❌ Gemini API呼び出しエラー (試行 ${attempt}/${maxRetries}):`, error.message);
-      
-      // Rate Limit (429) エラーの場合は待機してリトライ
-      if (attempt < maxRetries) {
-        const waitTime = 10000; // 10秒待機
-        console.log(`⏳ レート制限を回避するため ${waitTime / 1000} 秒待機して再試行します...`);
-        await sleep(waitTime);
-      } else {
-        console.error('❌ 最大リトライ回数に達したため、原文のまま処理を続行します。');
-        return items;
-      }
+      console.warn('⚠️ Gemini APIの利用上限（またはエラー）に達したため、無料Google翻訳エンジンへフォールバックします。');
     }
   }
 
-  return items;
+  // Gemini APIが失敗・上限到達・未設定の場合のフォールバック処理
+  console.log('🔄 無料Google翻訳エンジンで英文化を開始します...');
+  const fallbackItems = [];
+  for (const item of items) {
+    const translatedTitle = await fallbackTranslate(item.title);
+    const translatedMaker = await fallbackTranslate(item.maker);
+    fallbackItems.push({
+      ...item,
+      title: translatedTitle || item.title,
+      maker: translatedMaker || item.maker
+    });
+  }
+  console.log('✅ フォールバック翻訳処理が完了しました！');
+  return fallbackItems;
 }
 
 async function fetchDLsiteData() {
