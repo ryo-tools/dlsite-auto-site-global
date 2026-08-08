@@ -10,6 +10,35 @@ const DOMAIN = 'https://dlsite-auto-site-global.pages.dev';
 const apiKey = process.env.GEMINI_API_KEY;
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
+// 現在利用可能な最適（最新）のGeminiモデル名を動的に取得する関数
+async function getBestAvailableModel() {
+  if (process.env.GEMINI_MODEL) {
+    return process.env.GEMINI_MODEL;
+  }
+
+  try {
+    console.log('🔍 利用可能な最新のGeminiモデルを検索中...');
+    const modelsResponse = await ai.models.list();
+    const models = modelsResponse.models || [];
+
+    // 利用可能なモデルの中から 'flash' を含む安定版モデルを自動検索
+    const flashModel = models.find(m => 
+      m.name && m.name.includes('flash') && !m.name.includes('experimental')
+    );
+
+    if (flashModel) {
+      const modelId = flashModel.name.replace(/^models\//, '');
+      console.log(`✅ 自動選択されたモデル: ${modelId}`);
+      return modelId;
+    }
+  } catch (error) {
+    console.warn('⚠️ モデル一覧の動的取得に失敗したためフォールバックモデルを使用します:', error.message);
+  }
+
+  // 万が一取得失敗した際の安全策フォールバック
+  return 'gemini-2.0-flash';
+}
+
 // テキストの不必要な改行や特殊文字をクリーンアップする関数
 function cleanText(text) {
   if (!text) return '';
@@ -25,9 +54,11 @@ async function translateItemsToEnglish(items) {
 
   if (items.length === 0) return items;
 
-  console.log(`🌐 Gemini APIを使って ${items.length} 件のデータ翻訳を開始します...`);
+  // 利用可能なモデルを自動取得
+  const activeModel = await getBestAvailableModel();
 
-  // 入力データのテキストクリーンアップ
+  console.log(`🌐 Gemini API (${activeModel}) で ${items.length} 件のデータ翻訳を開始します...`);
+
   const sanitizedInput = items.map(i => ({
     title: cleanText(i.title),
     maker: cleanText(i.maker)
@@ -47,7 +78,7 @@ ${JSON.stringify(sanitizedInput)}`;
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: activeModel,
       contents: prompt,
       config: {
         responseMimeType: 'application/json'
@@ -101,7 +132,6 @@ async function fetchDLsiteData() {
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
   });
 
-  // 英語設定Cookieおよび年齢認証
   await context.addCookies([
     { name: 'adultchecked', value: '1', domain: '.dlsite.com', path: '/' },
     { name: 'work_view_option', value: '1', domain: '.dlsite.com', path: '/' },
@@ -190,7 +220,6 @@ async function fetchDLsiteData() {
   }
 }
 
-// デザインスタイル
 const commonStyle = `
   * { box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f5f7fa; color: #333; margin: 0; padding: 0; line-height: 1.5; }
@@ -288,7 +317,6 @@ async function main() {
     return;
   }
 
-  // 取得データをGemini APIで最終クリーンアップ（英語への統一処理）
   const items = await translateItemsToEnglish(rawItems);
 
   const publicDir = path.join(process.cwd(), 'public');
@@ -303,7 +331,6 @@ async function main() {
   if (!fs.existsSync(gameDir)) fs.mkdirSync(gameDir, { recursive: true });
   if (!fs.existsSync(cgDir)) fs.mkdirSync(cgDir, { recursive: true });
 
-  // 1. トップページ
   const topHTML = generateHTML(
     'DLsite Global Works Hub | Daily Updates',
     'Explore the latest and popular works on DLsite including ASMR, Manga, Games, and CGs. Updated daily!',
@@ -312,7 +339,6 @@ async function main() {
   );
   fs.writeFileSync(path.join(publicDir, 'index.html'), topHTML);
 
-  // 2. Voice / ASMR
   const asmrKeywords = ['Voice', 'ASMR', 'Audio', 'Sound', '耳かき', '睡眠', '癒やし', 'Music', 'Drama', 'Whisper'];
   const asmrItems = items.filter(item => 
     asmrKeywords.some(kw => item.title.toLowerCase().includes(kw.toLowerCase()) || item.maker.toLowerCase().includes(kw.toLowerCase()) || item.workType.toLowerCase().includes(kw.toLowerCase()))
@@ -325,7 +351,6 @@ async function main() {
   );
   fs.writeFileSync(path.join(asmrDir, 'index.html'), asmrHTML);
 
-  // 3. Manga & Comic
   const mangaKeywords = ['Manga', 'Comic', 'Doujinshi'];
   const mangaItems = items.filter(item => 
     mangaKeywords.some(kw => item.title.toLowerCase().includes(kw.toLowerCase()) || item.maker.toLowerCase().includes(kw.toLowerCase()) || item.workType.toLowerCase().includes(kw.toLowerCase()))
@@ -338,7 +363,6 @@ async function main() {
   );
   fs.writeFileSync(path.join(mangaDir, 'index.html'), mangaHTML);
 
-  // 4. Games
   const gameKeywords = ['Game', 'RPG', 'ACT', 'SLG', 'ADV', 'Novel', '3D', '2D'];
   const gameItems = items.filter(item => 
     gameKeywords.some(kw => item.title.toLowerCase().includes(kw.toLowerCase()) || item.maker.toLowerCase().includes(kw.toLowerCase()) || item.workType.toLowerCase().includes(kw.toLowerCase()))
@@ -351,7 +375,6 @@ async function main() {
   );
   fs.writeFileSync(path.join(gameDir, 'index.html'), gameHTML);
 
-  // 5. CG & Illustrations
   const cgKeywords = ['CG', 'Illustration', 'Artbook'];
   const cgItems = items.filter(item => 
     cgKeywords.some(kw => item.title.toLowerCase().includes(kw.toLowerCase()) || item.maker.toLowerCase().includes(kw.toLowerCase()) || item.workType.toLowerCase().includes(kw.toLowerCase()))
@@ -364,7 +387,6 @@ async function main() {
   );
   fs.writeFileSync(path.join(cgDir, 'index.html'), cgHTML);
 
-  // 6. SEO XML
   const sitemapXML = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
