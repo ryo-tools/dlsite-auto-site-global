@@ -3,7 +3,7 @@ import path from 'path';
 import { chromium } from 'playwright';
 import { GoogleGenAI } from '@google/genai';
 
-const AFFILIATE_ID = 'yofukashireview';
+const AFFILIATE_ID = 'yofukashiglobal';
 const DOMAIN = 'https://dlsite-auto-site-global.pages.dev';
 
 // Gemini APIの初期化
