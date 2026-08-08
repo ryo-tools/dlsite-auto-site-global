@@ -16,7 +16,7 @@ function cleanText(text) {
   return text.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-// 無料のGoogle Translate APIエンドポイント（Gemini上限時のフォールバック用）
+// 無料のGoogle Translate APIエンドポイント（フォールバック用）
 async function fallbackTranslate(text) {
   if (!text) return '';
   try {
@@ -32,7 +32,7 @@ async function fallbackTranslate(text) {
   return text;
 }
 
-// 現在利用可能な最適（最新）のGeminiモデル名を動的に取得する関数
+// 利用可能なGeminiモデルの動的取得
 async function getBestAvailableModel() {
   if (process.env.GEMINI_MODEL) {
     return process.env.GEMINI_MODEL;
@@ -53,13 +53,13 @@ async function getBestAvailableModel() {
       return modelId;
     }
   } catch (error) {
-    console.warn('⚠️ モデル一覧の動的取得に失敗したためフォールバックモデルを使用します:', error.message);
+    console.warn('⚠️ モデル一覧取得失敗のためデフォルトを使用:', error.message);
   }
 
   return 'gemini-2.0-flash';
 }
 
-// 作品タイトルとサークル名を英語へ翻訳・整形する関数（Gemini API ➔ 上限時はGoogle Translateへ自動フォールバック）
+// 作品タイトルとサークル名を完全に英語化する関数
 async function translateItemsToEnglish(items) {
   if (items.length === 0) return items;
 
@@ -108,11 +108,11 @@ ${JSON.stringify(sanitizedInput)}`;
         }));
       }
     } catch (error) {
-      console.warn('⚠️ Gemini APIの利用上限（またはエラー）に達したため、無料Google翻訳エンジンへフォールバックします。');
+      console.warn('⚠️ Gemini API制限のため、Google Translateへフォールバックします。');
     }
   }
 
-  // Gemini APIが失敗・上限到達・未設定の場合のフォールバック処理
+  // フォールバック処理（Google Translate）
   console.log('🔄 無料Google翻訳エンジンで英文化を開始します...');
   const fallbackItems = [];
   for (const item of items) {
@@ -337,6 +337,7 @@ async function main() {
     return;
   }
 
+  // 取得データを英語へ翻訳（Gemini ➔ 失敗時は Google Translate）
   const items = await translateItemsToEnglish(rawItems);
 
   const publicDir = path.join(process.cwd(), 'public');
@@ -442,6 +443,7 @@ Allow: /
 Sitemap: ${DOMAIN}/sitemap.xml`;
   fs.writeFileSync(path.join(publicDir, 'robots.txt'), robotsTxt);
 
+  // 翻訳済みの確定データを出力
   fs.writeFileSync(path.join(publicDir, 'data.json'), JSON.stringify(items, null, 2));
 
   console.log('Build complete: DLsite Global (EN) static pages generated with AI translation.');
