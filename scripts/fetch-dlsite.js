@@ -6,18 +6,32 @@ import { GoogleGenAI } from '@google/genai';
 const AFFILIATE_ID = 'yofukashireview';
 const DOMAIN = 'https://dlsite-auto-site-global.pages.dev';
 
-// Gemini APIの初期化（GEMINI_API_KEY がセットされている場合のみ起動）
+// Gemini APIの初期化
 const apiKey = process.env.GEMINI_API_KEY;
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
+// テキストの不必要な改行や特殊文字をクリーンアップする関数
+function cleanText(text) {
+  if (!text) return '';
+  return text.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 // 作品タイトルとサークル名を強力に英語へ翻訳・整形する関数
 async function translateItemsToEnglish(items) {
-  if (!ai || items.length === 0) {
-    console.log('GEMINI_API_KEY 未設定またはデータなしのため、AI翻訳をスキップして続行します。');
+  if (!ai) {
+    console.log('⚠️ GEMINI_API_KEY が検出されませんでした。AI翻訳をスキップします。');
     return items;
   }
 
-  console.log('Gemini APIを使って作品タイトルとサークル名を厳格に英語化中...');
+  if (items.length === 0) return items;
+
+  console.log(`🌐 Gemini APIを使って ${items.length} 件のデータ翻訳を開始します...`);
+
+  // 入力データのテキストクリーンアップ
+  const sanitizedInput = items.map(i => ({
+    title: cleanText(i.title),
+    maker: cleanText(i.maker)
+  }));
 
   const prompt = `You are a professional translator specializing in Japanese anime, manga, ASMR, and doujin content.
 Translate the following product titles and creator/circle names into clear, natural, high-converting English for an English-speaking audience.
@@ -29,7 +43,7 @@ STRICT INSTRUCTIONS:
 4. Use standard English terms (e.g., ASMR, Voice Drama, Ear Cleaning, Whispers, Doujinshi, RPG).
 
 Input Data:
-${JSON.stringify(items.map(i => ({ title: i.title, maker: i.maker })))}`;
+${JSON.stringify(sanitizedInput)}`;
 
   try {
     const response = await ai.models.generateContent({
@@ -40,15 +54,25 @@ ${JSON.stringify(items.map(i => ({ title: i.title, maker: i.maker })))}`;
       }
     });
 
+    console.log('--- Gemini API Raw Response ---');
+    console.log(response.text);
+    console.log('-------------------------------');
+
     const translatedArray = JSON.parse(response.text);
 
-    return items.map((item, index) => ({
-      ...item,
-      title: translatedArray[index]?.title || item.title,
-      maker: translatedArray[index]?.maker || item.maker
-    }));
+    if (Array.isArray(translatedArray) && translatedArray.length === items.length) {
+      console.log('✅ Gemini APIによる英文翻訳が完了しました！');
+      return items.map((item, index) => ({
+        ...item,
+        title: cleanText(translatedArray[index]?.title) || item.title,
+        maker: cleanText(translatedArray[index]?.maker) || item.maker
+      }));
+    } else {
+      console.warn('⚠️ 翻訳結果の要素数が一致しないため原文を保持します。');
+      return items;
+    }
   } catch (error) {
-    console.error('AI翻訳中にエラーが発生しました:', error);
+    console.error('❌ Gemini API呼び出し中にエラーが発生しました:', error);
     return items;
   }
 }
@@ -87,7 +111,6 @@ async function fetchDLsiteData() {
 
   try {
     console.log('Navigating to DLsite English Section...');
-    // 英語版ポータル (eng/new) に直接アクセス
     await page.goto('https://www.dlsite.com/eng/new', { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForTimeout(3000);
 
@@ -107,7 +130,6 @@ async function fetchDLsiteData() {
 
         const rjCode = rjMatch[1].toUpperCase();
 
-        // dlaf.jp 形式のアフィリエイトURL
         const finalLink = `https://dlaf.jp/home/dlaf/=/t/s/link/work/aid/${affiliateId}/id/${rjCode}.html`;
 
         const container = linkEl.closest('tr') || linkEl.closest('.work_thumb_box') || linkEl.closest('li') || linkEl.closest('.work_1col') || linkEl.parentElement.parentElement;
@@ -127,7 +149,6 @@ async function fetchDLsiteData() {
           const typeEl = container.querySelector('.work_category, .work_genre, .work_type, .work_img_icon span, .icon_work_type');
           if (typeEl) workType = typeEl.innerText.trim();
 
-          // 表示されている画像を優先取得
           const imgEl = container.querySelector('img');
           if (imgEl) {
             imgUrl = imgEl.getAttribute('data-src') || imgEl.getAttribute('src') || '';
@@ -135,7 +156,6 @@ async function fetchDLsiteData() {
           }
         }
 
-        // フォールバック用の画像URL設定
         if (!imgUrl) {
           const digits = rjCode.replace('RJ', '');
           const num = parseInt(digits, 10);
